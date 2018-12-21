@@ -25,7 +25,7 @@ import java.util.Properties
 
 plugins {
     `kotlin-dsl`
-    id("org.gradle.kotlin.ktlint-convention") version "0.1.15" apply false
+    id("org.gradle.kotlin-dsl.ktlint-convention") version "0.2.0" apply false
 }
 
 subprojects {
@@ -76,6 +76,8 @@ subprojects {
         failOnWarning = true
         enableStricterValidation = true
     }
+
+    apply(from = "../../../gradle/shared-with-buildSrc/code-quality-configuration.gradle.kts")
 }
 
 allprojects {
@@ -113,10 +115,6 @@ if (findProperty("gradlebuild.skipBuildSrcChecks") == "true") {
 
 // TODO Avoid duplication of what defines a CI Server with BuildEnvironment
 val isCiServer: Boolean by extra { "CI" in System.getenv() }
-if (!isCiServer || System.getProperty("enableCodeQuality")?.toLowerCase() == "true") {
-    apply(from = "../gradle/shared-with-buildSrc/code-quality-configuration.gradle.kts")
-}
-
 if (isCiServer) {
     gradle.buildFinished {
         allprojects.forEach { project ->
@@ -217,7 +215,7 @@ fun Project.applyGroovyProjectConventions() {
 
 fun Project.applyKotlinProjectConventions() {
     apply(plugin = "org.gradle.kotlin.kotlin-dsl")
-    apply(plugin = "org.gradle.kotlin.ktlint-convention")
+    apply(plugin = "org.gradle.kotlin-dsl.ktlint-convention")
 
     plugins.withType<KotlinDslPlugin> {
         kotlinDslPluginOptions {

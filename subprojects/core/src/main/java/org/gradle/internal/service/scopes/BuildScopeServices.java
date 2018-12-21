@@ -19,7 +19,6 @@ package org.gradle.internal.service.scopes;
 import org.gradle.StartParameter;
 import org.gradle.api.Action;
 import org.gradle.api.Project;
-import org.gradle.api.internal.ClassGenerator;
 import org.gradle.api.internal.ClassPathRegistry;
 import org.gradle.api.internal.DefaultClassPathProvider;
 import org.gradle.api.internal.DefaultClassPathRegistry;
@@ -64,8 +63,8 @@ import org.gradle.api.internal.project.taskfactory.TaskClassInfoStore;
 import org.gradle.api.internal.project.taskfactory.TaskFactory;
 import org.gradle.api.internal.tasks.TaskStatistics;
 import org.gradle.api.internal.tasks.properties.DefaultPropertyWalker;
-import org.gradle.api.internal.tasks.properties.PropertyMetadataStore;
 import org.gradle.api.internal.tasks.properties.PropertyWalker;
+import org.gradle.api.internal.tasks.properties.TypePropertyMetadataStore;
 import org.gradle.api.internal.tasks.userinput.BuildScanUserInputHandler;
 import org.gradle.api.internal.tasks.userinput.DefaultBuildScanUserInputHandler;
 import org.gradle.api.internal.tasks.userinput.DefaultUserInputHandler;
@@ -249,16 +248,16 @@ public class BuildScopeServices extends DefaultServiceRegistry {
         return new LifecycleProjectEvaluator(buildOperationExecutor, withActionsEvaluator);
     }
 
-    protected PropertyWalker createPropertyWalker(PropertyMetadataStore propertyMetadataStore) {
-        return new DefaultPropertyWalker(propertyMetadataStore);
+    protected PropertyWalker createPropertyWalker(TypePropertyMetadataStore typePropertyMetadataStore) {
+        return new DefaultPropertyWalker(typePropertyMetadataStore);
     }
 
-    protected ITaskFactory createITaskFactory(TaskClassInfoStore taskClassInfoStore, PropertyWalker propertyWalker, ClassGenerator classGenerator) {
+    protected ITaskFactory createITaskFactory(Instantiator instantiator, TaskClassInfoStore taskClassInfoStore, PropertyWalker propertyWalker) {
         return new AnnotationProcessingTaskFactory(
+            instantiator,
             taskClassInfoStore,
             new PropertyAssociationTaskFactory(
-                new TaskFactory(
-                    classGenerator),
+                new TaskFactory(),
                 propertyWalker
             ));
     }

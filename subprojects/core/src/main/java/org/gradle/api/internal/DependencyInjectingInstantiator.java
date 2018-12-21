@@ -16,90 +16,90 @@
 
 package org.gradle.api.internal;
 
-import org.gradle.api.Transformer;
+import org.gradle.api.internal.instantiation.ConstructorSelector;
+import org.gradle.api.internal.instantiation.SelectedConstructor;
 import org.gradle.api.reflect.ObjectInstantiationException;
-import org.gradle.cache.internal.CrossBuildInMemoryCache;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.reflect.JavaReflectionUtil;
 import org.gradle.internal.service.ServiceRegistry;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
-import java.util.List;
 
 /**
- * An {@link Instantiator} that applies JSR-330 style dependency injection.
+ * An {@link Instantiator} that applies dependency injection, delegating to a {@link ConstructorSelector} to decide which constructor to use to create instances.
  */
 public class DependencyInjectingInstantiator implements Instantiator {
-
-    private final ServiceRegistry services;
-    private final CrossBuildInMemoryCache<Class<?>, CachedConstructor> constructorCache;
     private final ClassGenerator classGenerator;
+    private final ServiceRegistry services;
+    private final ConstructorSelector constructorSelector;
 
-    public DependencyInjectingInstantiator(ServiceRegistry services, CrossBuildInMemoryCache<Class<?>, CachedConstructor> constructorCache) {
-        this.classGenerator = new ClassGenerator() {
-            @Override
-            public <T> Class<? extends T> generate(Class<T> type) {
-                return type;
-            }
-        };
-        this.services = services;
-        this.constructorCache = constructorCache;
-    }
-
-    public DependencyInjectingInstantiator(ClassGenerator classGenerator, ServiceRegistry services, CrossBuildInMemoryCache<Class<?>, CachedConstructor> constructorCache) {
+    public DependencyInjectingInstantiator(ConstructorSelector constructorSelector, ClassGenerator classGenerator, ServiceRegistry services) {
         this.classGenerator = classGenerator;
         this.services = services;
-        this.constructorCache = constructorCache;
+        this.constructorSelector = constructorSelector;
     }
 
     public <T> T newInstance(Class<? extends T> type, Object... parameters) {
         try {
-            Constructor<?> constructor = findConstructor(type);
-            Object[] resolvedParameters = convertParameters(type, constructor, parameters, null);
+            SelectedConstructor constructor = findConstructor(type, parameters);
+            Object[] resolvedParameters = convertParameters(type, constructor, parameters);
+            Object instance;
             try {
-                Object instance = constructor.newInstance(resolvedParameters);
-                if (instance instanceof WithServiceRegistry) {
-                    ((WithServiceRegistry) instance).setServices(services);
-                }
-                return type.cast(instance);
+                instance =  classGenerator.newInstance(constructor.getConstructor(), services, this, resolvedParameters);
             } catch (InvocationTargetException e) {
                 throw e.getCause();
             }
+            return type.cast(instance);
         } catch (Throwable t) {
             throw new ObjectInstantiationException(type, t);
         }
     }
 
-    private <T> Constructor<?> findConstructor(final Class<? extends T> type) throws Throwable {
-        CachedConstructor cached = constructorCache.get(type, new Transformer<CachedConstructor, Class<?>>() {
-            @Override
-            public CachedConstructor transform(Class<?> aClass) {
-                try {
-                    validateType(type);
-                    Class<? extends T> implClass = classGenerator.generate(type);
-                    Constructor<?> constructor = InjectUtil.selectConstructor(implClass, type);
-                    constructor.setAccessible(true);
-                    return CachedConstructor.of(constructor);
-                } catch (Throwable e) {
-                    return CachedConstructor.of(e);
-                }
-            }
-        });
-        if (cached.error != null) {
-            throw cached.error;
+    private SelectedConstructor findConstructor(Class<?> type, Object[] parameters) throws Throwable {
+        SelectedConstructor constructor = constructorSelector.forParams(type, parameters);
+        if (constructor.getFailure() != null) {
+            throw constructor.getFailure();
         }
-        return cached.constructor;
+        return constructor;
     }
 
-    private <T> Object[] convertParameters(Class<T> type, Constructor<?> constructor, Object[] parameters, List<Object> injectedServices) {
-        Class<?>[] parameterTypes = constructor.getParameterTypes();
+    private <T> Object[] convertParameters(Class<T> type, SelectedConstructor constructor, Object[] parameters) {
+        Class<?>[] parameterTypes = constructor.getConstructor().getParameterTypes();
         if (parameterTypes.length < parameters.length) {
             throw new IllegalArgumentException(String.format("Too many parameters provided for constructor for class %s. Expected %s, received %s.", type.getName(), parameterTypes.length, parameters.length));
         }
-        Type[] genericTypes = constructor.getGenericParameterTypes();
+        if (parameterTypes.length == parameters.length) {
+            // No services to be mixed in
+            return verifyParameters(type, constructor, parameters);
+        } else {
+            return addServicesToParameters(type, constructor, parameters);
+        }
+    }
+
+    private <T> Object[] verifyParameters(Class<T> type, SelectedConstructor constructor, Object[] parameters) {
+        Class<?>[] parameterTypes = constructor.getConstructor().getParameterTypes();
+        for (int i = 0; i < parameterTypes.length; i++) {
+            Class<?> targetType = parameterTypes[i];
+            if (targetType.isPrimitive()) {
+                targetType = JavaReflectionUtil.getWrapperTypeForPrimitiveType(targetType);
+            }
+            Object currentParameter = parameters[i];
+            if (currentParameter == null && constructor.allowsNullParameters()) {
+                continue;
+            }
+            if (!targetType.isInstance(currentParameter)) {
+                StringBuilder builder = new StringBuilder(String.format("Unable to determine %s argument #%s:", type.getName(), i + 1));
+                builder.append(String.format(" value %s not assignable to type %s", currentParameter, parameterTypes[i]));
+                throw new IllegalArgumentException(builder.toString());
+            }
+        }
+        return parameters;
+    }
+
+    private <T> Object[] addServicesToParameters(Class<T> type, SelectedConstructor constructor, Object[] parameters) {
+        Class<?>[] parameterTypes = constructor.getConstructor().getParameterTypes();
+        Type[] genericTypes = constructor.getConstructor().getGenericParameterTypes();
         Object[] resolvedParameters = new Object[parameterTypes.length];
         int pos = 0;
         for (int i = 0; i < resolvedParameters.length; i++) {
@@ -114,11 +114,7 @@ public class DependencyInjectingInstantiator implements Instantiator {
                 pos++;
             } else {
                 currentParameter = services.find(serviceType);
-                if (currentParameter != null && injectedServices != null) {
-                    injectedServices.add(currentParameter);
-                }
             }
-
             if (currentParameter != null) {
                 resolvedParameters[i] = currentParameter;
             } else {
@@ -136,44 +132,5 @@ public class DependencyInjectingInstantiator implements Instantiator {
             throw new IllegalArgumentException(String.format("Unexpected parameter provided for constructor for class %s.", type.getName()));
         }
         return resolvedParameters;
-    }
-
-    private static <T> void validateType(Class<T> type) {
-        if (type.isInterface() || type.isAnnotation() || type.isEnum()) {
-            throw new IllegalArgumentException(String.format("Type %s is not a class.", type.getName()));
-        }
-        if (type.getEnclosingClass() != null && !Modifier.isStatic(type.getModifiers())) {
-            throw new IllegalArgumentException(String.format("Class %s is a non-static inner class.", type.getName()));
-        }
-        if (Modifier.isAbstract(type.getModifiers())) {
-            throw new IllegalArgumentException(String.format("Class %s is an abstract class.", type.getName()));
-        }
-    }
-
-    static class CachedConstructor {
-        private final Constructor<?> constructor;
-        private final Throwable error;
-
-        private CachedConstructor(Constructor<?> constructor, Throwable error) {
-            this.constructor = constructor;
-            this.error = error;
-        }
-
-        public static CachedConstructor of(Constructor<?> ctor) {
-            return new CachedConstructor(ctor, null);
-        }
-
-        public static CachedConstructor of(Throwable err) {
-            return new CachedConstructor(null, err);
-        }
-
-    }
-
-    /**
-     * An internal interface that can be used by code generators/proxies to indicate that
-     * they require a service registry.
-     */
-    public interface WithServiceRegistry {
-        void setServices(ServiceRegistry services);
     }
 }

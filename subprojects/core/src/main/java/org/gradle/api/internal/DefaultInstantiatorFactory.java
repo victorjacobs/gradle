@@ -16,44 +16,66 @@
 
 package org.gradle.api.internal;
 
-import org.gradle.cache.internal.CrossBuildInMemoryCache;
+import org.gradle.api.internal.instantiation.ConstructorSelector;
+import org.gradle.api.internal.instantiation.Jsr330ConstructorSelector;
+import org.gradle.api.internal.instantiation.ParamsMatchingConstructorSelector;
 import org.gradle.cache.internal.CrossBuildInMemoryCacheFactory;
-import org.gradle.internal.reflect.DirectInstantiator;
 import org.gradle.internal.reflect.Instantiator;
 import org.gradle.internal.service.DefaultServiceRegistry;
 import org.gradle.internal.service.ServiceRegistry;
 
+import java.util.List;
+
 public class DefaultInstantiatorFactory implements InstantiatorFactory {
-    private final CrossBuildInMemoryCache<Class<?>, DependencyInjectingInstantiator.CachedConstructor> decoratedConstructorCache;
-    private final CrossBuildInMemoryCache<Class<?>, DependencyInjectingInstantiator.CachedConstructor> undecoratedConstructorCache;
-    private final ServiceRegistry noServices = new DefaultServiceRegistry();
-    private final ClassGenerator classGenerator;
-    private final Instantiator decoratingInstantiator;
+    private final ClassGenerator undecorated;
+    private final ClassGenerator decorated;
+    private final ConstructorSelector undecoratedJsr330Selector;
+    private final ConstructorSelector decoratedJsr330Selector;
+    private final ConstructorSelector decoratedLenientSelector;
+    private final Instantiator decoratingLenientInstantiator;
+    private final Instantiator undecoraredInjectingInstantiator;
+    private final Instantiator undecoratedLenientInjectingInstantiator;
 
     public DefaultInstantiatorFactory(ClassGenerator classGenerator, CrossBuildInMemoryCacheFactory cacheFactory) {
-        this.classGenerator = classGenerator;
-        this.decoratedConstructorCache = cacheFactory.newClassCache();
-        this.undecoratedConstructorCache = cacheFactory.newClassCache();
-        this.decoratingInstantiator = new ClassGeneratorBackedInstantiator(classGenerator, DirectInstantiator.INSTANCE);
+        decorated = classGenerator;
+        undecorated = new IdentityClassGenerator();
+        ServiceRegistry noServices = new DefaultServiceRegistry();
+        undecoratedJsr330Selector = new Jsr330ConstructorSelector(undecorated, cacheFactory.<Jsr330ConstructorSelector.CachedConstructor>newClassCache());
+        decoratedJsr330Selector = new Jsr330ConstructorSelector(classGenerator, cacheFactory.<Jsr330ConstructorSelector.CachedConstructor>newClassCache());
+        decoratedLenientSelector = new ParamsMatchingConstructorSelector(classGenerator, cacheFactory.<List<ParamsMatchingConstructorSelector.CachedConstructor>>newClassCache());
+        decoratingLenientInstantiator = new DependencyInjectingInstantiator(decoratedLenientSelector, classGenerator, noServices);
+        undecoraredInjectingInstantiator = new DependencyInjectingInstantiator(undecoratedJsr330Selector, undecorated, noServices);
+        undecoratedLenientInjectingInstantiator = new DependencyInjectingInstantiator(new ParamsMatchingConstructorSelector(undecorated, cacheFactory.<List<ParamsMatchingConstructorSelector.CachedConstructor>>newClassCache()), undecorated, noServices);
     }
 
     @Override
     public Instantiator inject(ServiceRegistry registry) {
-        return new DependencyInjectingInstantiator(registry, undecoratedConstructorCache);
+        return new DependencyInjectingInstantiator(undecoratedJsr330Selector, undecorated, registry);
     }
 
     @Override
     public Instantiator inject() {
-        return new DependencyInjectingInstantiator(noServices, undecoratedConstructorCache);
+        return undecoraredInjectingInstantiator;
+    }
+
+    @Override
+    public Instantiator injectLenient() {
+        return undecoratedLenientInjectingInstantiator;
     }
 
     @Override
     public Instantiator decorate() {
-        return decoratingInstantiator;
+        return decoratingLenientInstantiator;
     }
 
     @Override
     public Instantiator injectAndDecorate(ServiceRegistry registry) {
-        return new DependencyInjectingInstantiator(classGenerator, registry, decoratedConstructorCache);
+        return new DependencyInjectingInstantiator(decoratedJsr330Selector, decorated, registry);
     }
+
+    @Override
+    public Instantiator injectAndDecorateLenient(ServiceRegistry registry) {
+        return new DependencyInjectingInstantiator(decoratedLenientSelector, decorated, registry);
+    }
+
 }
