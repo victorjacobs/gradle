@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 the original author or authors.
+ * Copyright 2018 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,35 +19,30 @@ package org.gradle.buildinit.plugins
 import org.gradle.buildinit.plugins.fixtures.ScriptDslFixture
 import spock.lang.Unroll
 
-class GroovyApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
+class CppApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
 
-    public static final String SAMPLE_APP_CLASS = "some/thing/App.groovy"
-    public static final String SAMPLE_APP_TEST_CLASS = "some/thing/AppTest.groovy"
+    public static final String SAMPLE_APP_CLASS = "app.cpp"
+    public static final String SAMPLE_APP_HEADER = "app.h"
+    public static final String SAMPLE_APP_TEST_CLASS = "app_test.cpp"
 
     @Unroll
     def "creates sample source if no source present with #scriptDsl build scripts"() {
         when:
-        run('init', '--type', 'groovy-application', '--dsl', scriptDsl.id)
+        run('init', '--type', 'cpp-application', '--dsl', scriptDsl.id)
 
         then:
-        targetDir.file("src/main/groovy").assertHasDescendants(SAMPLE_APP_CLASS)
-        targetDir.file("src/test/groovy").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
+        targetDir.file("src/main/cpp").assertHasDescendants(SAMPLE_APP_CLASS)
+        targetDir.file("src/main/headers").assertHasDescendants(SAMPLE_APP_HEADER)
+        //targetDir.file("src/test/groovy").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
 
         and:
-        commonJvmFilesGenerated(scriptDsl)
+        commonFilesGenerated(scriptDsl)
 
-        when:
-        run("build")
+        and:
+        succeeds("build")
 
-        then:
-        assertTestPassed("some.thing.AppTest", "application has a greeting")
-
-        when:
-        run("run")
-
-        then:
-        outputContains("Hello world")
-
+        and:
+        
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
     }
