@@ -30,17 +30,17 @@ public class CppApplicationProjectInitDescriptor extends CppProjectInitDescripto
 
     @Override
     protected TemplateOperation sourceTemplateOperation(InitSettings settings) {
-        return fromCppTemplate("cppapp/app.cpp.template", "main", "cpp");
+        return fromCppTemplate("cppapp/app.cpp.template", settings,"main", "cpp");
     }
 
     @Override
     protected TemplateOperation headerTemplateOperation(InitSettings settings) {
-        return fromCppTemplate("cppapp/app.h.template", "main", "headers");
+        return fromCppTemplate("cppapp/app.h.template", settings,"main", "headers");
     }
 
     @Override
     protected TemplateOperation testTemplateOperation(InitSettings settings) {
-        return fromCppTemplate("cppapp/app_test.cpp.template", "test", "cpp");
+        return fromCppTemplate("cppapp/app_test.cpp.template", settings,"test", "cpp");
     }
 
     @Override

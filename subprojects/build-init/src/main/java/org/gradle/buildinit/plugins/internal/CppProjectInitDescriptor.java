@@ -58,11 +58,19 @@ public abstract class CppProjectInitDescriptor extends LanguageLibraryProjectIni
     protected void configureBuildScript(InitSettings settings, BuildScriptBuilder buildScriptBuilder) {
     }
 
-    TemplateOperation fromCppTemplate(String template, String sourceSetName, String sourceDir) {
+    TemplateOperation fromCppTemplate(String template, InitSettings settings, String sourceSetName, String sourceDir) {
         String targetFileName = template.substring(template.lastIndexOf("/") + 1).replace(".template", "");
+        String namespacePrefix = "";
+        String namespaceDecl = "";
+        if (settings != null && !settings.getPackageName().isEmpty()) {
+            namespaceDecl = "namespace " + settings.getPackageName() + " {";
+            namespacePrefix = settings.getPackageName() + "::";
+        }
         return templateOperationFactory.newTemplateOperation()
             .withTemplate(template)
             .withTarget("src/" + sourceSetName + "/" + sourceDir + "/" + targetFileName)
+            .withBinding("namespaceDecl", namespaceDecl)
+            .withBinding("namespacePrefix", namespacePrefix)
             .create();
     }
 }

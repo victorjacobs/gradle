@@ -17,6 +17,9 @@
 package org.gradle.buildinit.plugins
 
 import org.gradle.buildinit.plugins.fixtures.ScriptDslFixture
+import org.gradle.nativeplatform.fixtures.AvailableToolChains
+import org.gradle.nativeplatform.fixtures.ExecutableFixture
+import org.gradle.util.TextUtil
 import spock.lang.Unroll
 
 class CppApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
@@ -28,12 +31,12 @@ class CppApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
     @Unroll
     def "creates sample source if no source present with #scriptDsl build scripts"() {
         when:
-        run('init', '--type', 'cpp-application', '--dsl', scriptDsl.id)
+        run('init', '--type', 'cpp-application', '--project-name', 'app', '--dsl', scriptDsl.id)
 
         then:
         targetDir.file("src/main/cpp").assertHasDescendants(SAMPLE_APP_CLASS)
         targetDir.file("src/main/headers").assertHasDescendants(SAMPLE_APP_HEADER)
-        //targetDir.file("src/test/groovy").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
+        targetDir.file("src/test/cpp").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
 
         and:
         commonFilesGenerated(scriptDsl)
@@ -42,96 +45,82 @@ class CppApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
         succeeds("build")
 
         and:
-        
+        executable("build/install/main/debug/app").exec().out ==  TextUtil.toPlatformLineSeparators("Hello, World!\n")
+
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
     }
 
     @Unroll
-    def "creates sample source using spock instead of junit with #scriptDsl build scripts"() {
+    def "creates sample source with namespace and #scriptDsl build scripts"() {
         when:
-        run('init', '--type', 'groovy-application', '--test-framework', 'spock', '--dsl', scriptDsl.id)
+        run('init', '--type', 'cpp-application', '--project-name', 'app', '--package', 'my::app', '--dsl', scriptDsl.id)
 
         then:
-        targetDir.file("src/main/groovy").assertHasDescendants(SAMPLE_APP_CLASS)
-        targetDir.file("src/test/groovy").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
+        targetDir.file("src/main/cpp").assertHasDescendants(SAMPLE_APP_CLASS)
+        targetDir.file("src/main/headers").assertHasDescendants(SAMPLE_APP_HEADER)
+        targetDir.file("src/test/cpp").assertHasDescendants(SAMPLE_APP_TEST_CLASS)
 
         and:
-        commonJvmFilesGenerated(scriptDsl)
-
-        when:
-        run("build")
-
-        then:
-        assertTestPassed("some.thing.AppTest", "application has a greeting")
-
-        where:
-        scriptDsl << ScriptDslFixture.SCRIPT_DSLS
-    }
-
-    @Unroll
-    def "specifying TestNG is not supported with #scriptDsl build scripts"() {
-        when:
-        fails('init', '--type', 'groovy-application', '--test-framework', 'testng', '--dsl', scriptDsl.id)
-
-        then:
-        failure.assertHasCause("""The requested test framework 'testng' is not supported for 'groovy-application' setup type. Supported frameworks:
-  - 'spock'""")
-
-        where:
-        scriptDsl << ScriptDslFixture.SCRIPT_DSLS
-    }
-
-    @Unroll
-    def "creates sample source with package and #scriptDsl build scripts"() {
-        when:
-        run('init', '--type', 'groovy-application', '--package', 'my.app', '--dsl', scriptDsl.id)
-
-        then:
-        targetDir.file("src/main/groovy").assertHasDescendants("my/app/App.groovy")
-        targetDir.file("src/test/groovy").assertHasDescendants("my/app/AppTest.groovy")
+        commonFilesGenerated(scriptDsl)
 
         and:
-        commonJvmFilesGenerated(scriptDsl)
+        targetDir.file("src/main/headers/${SAMPLE_APP_HEADER}").text.contains("namespace my::app")
 
-        when:
-        run("build")
+        and:
+        succeeds("build")
 
-        then:
-        assertTestPassed("my.app.AppTest", "application has a greeting")
-
-        when:
-        run("run")
-
-        then:
-        outputContains("Hello world")
+        and:
+        executable("build/install/main/debug/app").exec().out ==  TextUtil.toPlatformLineSeparators("Hello, World!\n")
 
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
     }
 
     @Unroll
-    def "source generation is skipped when groovy sources detected with #scriptDsl build scripts"() {
+    def "source generation is skipped when cpp sources detected with #scriptDsl build scripts"() {
         setup:
-        targetDir.file("src/main/groovy/org/acme/SampleMain.groovy") << """
-        package org.acme;
+        targetDir.file("src/main/cpp/hello.cpp") << """
+            #include <iostream>
+            #include <stdlib.h>
+            #include "hello.h"
+            
+            std::string hello() {
+                return std::string("Hola, Mundo!");
+            }
+            
+            int main () {
+                std::cout << hello() << std::endl;
+                return 0;
+            }
+        """
+        targetDir.file("src/main/headers/hello.h") << """
+            #include <string>
 
-        public class SampleMain {
-        }
-"""
-        targetDir.file("src/test/groovy/org/acme/SampleMainTest.groovy") << """
-                package org.acme;
+            extern std::string hello();
+        """
+        targetDir.file("src/test/cpp/hello_test.cpp") << """
+            #include "hello.h"
+            #include <cassert>
 
-                class SampleMainTest {
-                }
+            int main() {
+                assert(hello().compare("Hola, Mundo!") == 0);
+                return 0;
+            }
         """
         when:
-        run('init', '--type', 'groovy-application', '--dsl', scriptDsl.id)
+        run('init', '--type', 'cpp-application', '--project-name', 'app', '--dsl', scriptDsl.id)
 
         then:
-        targetDir.file("src/main/groovy").assertHasDescendants("org/acme/SampleMain.groovy")
-        targetDir.file("src/test/groovy").assertHasDescendants("org/acme/SampleMainTest.groovy")
+        targetDir.file("src/main/cpp").assertHasDescendants("hello.cpp")
+        targetDir.file("src/main/headers").assertHasDescendants("hello.h")
+        targetDir.file("src/test/cpp").assertHasDescendants("hello_test.cpp")
         dslFixtureFor(scriptDsl).assertGradleFilesGenerated()
+
+        and:
+        targetDir.file("src/main/cpp/${SAMPLE_APP_CLASS}").assertDoesNotExist()
+        targetDir.file("src/main/headers/${SAMPLE_APP_HEADER}").assertDoesNotExist()
+        targetDir.file("src/test/cpp/${SAMPLE_APP_TEST_CLASS}").assertDoesNotExist()
 
         when:
         run("build")
@@ -139,7 +128,14 @@ class CppApplicationInitIntegrationTest extends AbstractInitIntegrationSpec {
         then:
         executed(":test")
 
+        and:
+        executable("build/install/main/debug/app").exec().out ==  TextUtil.toPlatformLineSeparators("Hola, Mundo!\n")
+
         where:
         scriptDsl << ScriptDslFixture.SCRIPT_DSLS
+    }
+
+    ExecutableFixture executable(String path) {
+        AvailableToolChains.defaultToolChain.executable(targetDir.file(path))
     }
 }
